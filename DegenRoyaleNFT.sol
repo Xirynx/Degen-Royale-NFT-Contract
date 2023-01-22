@@ -170,6 +170,19 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 		return true;
 	}
 
+	/**
+	 * @notice Checks if `wallet` has already minted in given phase of the mint
+	 * @dev Always returns false if phase is anything other than whitelist/public
+	 * @param _phase The phase of the mint to check minting status.
+	 * @param wallet Address of the minter
+	 * @return bool True if `wallet` has minted in the specific phase, false otherwise
+	 */
+	function hasMinted(Phase _phase, address wallet) public view returns (bool) {
+		if (_phase == Phase.WHITELIST) return _numberMinted(wallet) > 0;
+		if (_phase == Phase.PUBLIC) return mintedPublic[wallet];
+		return false;
+	}
+
 	//============================================//
 	//                Minting Logic               //        
 	//============================================//
