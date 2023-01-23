@@ -54,13 +54,14 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//              State Variables               //        
 	//============================================//
 
-	uint256 public MAX_SUPPLY = 2000;
+	uint256 public constant MAX_SUPPLY = 2000;
+	uint8 public constant MAX_PER_WALLET_WHITELIST = 2;
+	uint8 public constant MAX_PER_WALLET_PUBLIC = 2;
 	uint256 public mintPrice;
 	bytes32 public merkleRoot;
 	string internal baseURI;
 	address public signer;
 	Phase public phase = Phase.NONE;
-	mapping(address => bool) public mintedPublic;
 
 	//============================================//
 	//              Admin Functions               //        
@@ -69,7 +70,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Sets the mint price for all mints
 	 * @dev Caller must be contract owner
-     * @param _mintPrice New mint price in wei
+	 * @param _mintPrice New mint price in wei
 	 */
 	function setMintPrice(uint256 _mintPrice) public onlyOwner { 
         mintPrice = _mintPrice;
@@ -78,7 +79,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Sets the merkle tree root used to verify whitelist mints
 	 * @dev Caller must be contract owner
-     * @param _merkleRoot New root of merkle tree for whitelist mints
+	 * @param _merkleRoot New root of merkle tree for whitelist mints
 	 */
 	function setMerkleRoot(bytes32 _merkleRoot) public onlyOwner { 
         merkleRoot = _merkleRoot;
@@ -87,7 +88,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Sets the new signer wallet used to verify public mints
 	 * @dev Caller must be contract owner
-     * @param _signer New root of merkle tree for whitelist mints
+	 * @param _signer New root of merkle tree for whitelist mints
 	 */
 	function setSigner(address _signer) external onlyOwner {
 		signer = _signer;
@@ -96,7 +97,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Sets the base uri for token metadata
 	 * @dev Caller must be contract owner
-     * @param _newURI New base uri for token metadata
+	 * @param _newURI New base uri for token metadata
 	 */
 	function setBaseURI(string memory _newURI) external onlyOwner {
 		baseURI = _newURI;
@@ -105,7 +106,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Starts the whitelist minting phase
 	 * @dev Caller must be contract owner
-     * @param _merkleRoot New root of merkle tree for whitelist mints. Can be alterred at any point using `setMerkleRoot`
+	 * @param _merkleRoot New root of merkle tree for whitelist mints. Can be alterred at any point using `setMerkleRoot`
 	 * @param _mintPrice New mint price in wei for the whitelist mint. Can be alterred at any point using `setMintPrice`
 	 */
     function startWhitelistPhase(bytes32 _merkleRoot, uint256 _mintPrice) external onlyOwner { 
@@ -170,17 +171,35 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 		return true;
 	}
 
+	//============================================//
+	//              Helper Functions              //        
+	//============================================//
+
 	/**
-	 * @notice Checks if `wallet` has already minted in given phase of the mint
-	 * @dev Always returns false if phase is anything other than whitelist/public
-	 * @param _phase The phase of the mint to check minting status.
+	 * @notice Gets number of tokens minted by `wallet` in total
 	 * @param wallet Address of the minter
-	 * @return bool True if `wallet` has minted in the specific phase, false otherwise
+	 * @return uint256 Number of tokens
 	 */
-	function hasMinted(Phase _phase, address wallet) public view returns (bool) {
-		if (_phase == Phase.WHITELIST) return _numberMinted(wallet) > 0;
-		if (_phase == Phase.PUBLIC) return mintedPublic[wallet];
-		return false;
+	function numberMinted(address wallet) public view returns (uint256) {
+		return _numberMinted(wallet);
+	}
+
+	/**
+	 * @notice Gets number of tokens minted by `wallet` during a specific phase
+	 * @dev Bits [0-31] represent the number minted during the whitelist phase
+	 		Bits [31-63] represent the number minted during the public phase
+	 * @param wallet Address of the minter
+	 * @param _phase The phase of the mint
+	 * @return uint32 Number of tokens minted during specified phase, or 0
+	 */
+	function numberMinted(address wallet, Phase _phase) public view returns (uint32) {
+		if (_phase == Phase.WHITELIST) {
+			return uint32(_getAux(wallet) & ((1 << 32) - 1)); // Last 32 bits represents number minted during whitelist phase
+		}
+		if (_phase == Phase.PUBLIC) {
+			return uint32(_getAux(wallet) >> 32); // First 32 bits represents number minted during public phase
+		}
+		return uint32(0);
 	}
 
 	//============================================//
@@ -202,45 +221,52 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	}
 
 	/**
-	 * @notice Mints 1 token to caller's address
+	 * @notice Mints `amount` tokens to caller's address
 	 * @dev Caller must be an externally owned account
 	 * 		`phase` must equal WHITELIST
 	 *		Total supply must be less than or equal to `MAX_SUPPLY` after mint
-	 *		Caller must not have minted any tokens before
-	 *      Value sent in function call must exceed or equal `mintPrice`
+	 *		Caller must not mint more than `MAX_PER_WALLET_WHITELIST` tokens total during the whitelist phase
+	 *      Value sent in function call must exceed or equal `mintPrice` multiplied by `amount`
 	 *		Caller must be whitelisted
 	 * @param _merkleProof Proof that proves caller is part of merkle tree specified by `merkleRoot`
+	 * @param amount Amount of tokens to mint
 	 */
-	function whitelistMint(bytes32[] calldata _merkleProof) external payable {
+	function whitelistMint(bytes32[] calldata _merkleProof, uint8 amount) external payable {
 		if (tx.origin != msg.sender) revert CallerNotOrigin();
 		if (phase != Phase.WHITELIST) revert IncorrectPhase();
-		if (_totalMinted() >= MAX_SUPPLY) revert MaxSupplyExceeded();
-		if (_numberMinted(msg.sender) != 0) revert MaxMintAmountExceeded();
-		if (msg.value < mintPrice) revert InsufficientETH();
+		if (_totalMinted() + amount > MAX_SUPPLY) revert MaxSupplyExceeded();
+		uint256 numMinted = numberMinted(msg.sender, Phase.WHITELIST) + amount;
+		if (numMinted > MAX_PER_WALLET_WHITELIST) revert MaxMintAmountExceeded();
+		if (msg.value < mintPrice * amount) revert InsufficientETH();
 		if (!verifyWhitelist(msg.sender, _merkleProof)) revert AddressNotWhitelisted();
-		_mint(msg.sender, 1);
+		uint64 auxData = _getAux(msg.sender);
+		_setAux(msg.sender, uint64(auxData & ((1 << 32) - 1) << 32 | numMinted));
+		_mint(msg.sender, amount);
 	}
 
 	/**
-	 * @notice Mints 1 token to caller's address
+	 * @notice Mints `amount` tokens to caller's address
 	 * @dev Caller must be an externally owned account
 	 * 		`phase` must equal PUBLIC
-	 *		Caller must have zero mints during this phase
+	 *		Caller must not mint more than `MAX_PER_WALLET_PUBLIC` tokens total during the public phase
 	 *		Total supply must be less than or equal to `MAX_SUPPLY` after mint
-	 *      Value sent in function call must exceed or equal `mintPrice`
-	 *		Signer should sign caller's address (encoded as bytes) before they are allowed to mint
+	 *      Value sent in function call must exceed or equal `mintPrice` multiplied by `amount`
+	 *		Signer should sign caller's address (encoded as bytes) and their current `numberMinted` before they are allowed to mint
 	 * @param _signature Signature proving that account is allowed to mint during this phase
+	 * @param amount Amount of tokens to mint
 	 */
-	function publicMint(bytes memory _signature) external payable {
+	function publicMint(bytes memory _signature, uint8 amount) external payable {
 		if (tx.origin != msg.sender) revert CallerNotOrigin();
 		if (phase != Phase.PUBLIC) revert IncorrectPhase();
-		if (mintedPublic[msg.sender]) revert MaxMintAmountExceeded();
-		if (_totalMinted() >= MAX_SUPPLY) revert MaxSupplyExceeded();
-		if (msg.value < mintPrice) revert InsufficientETH();
-		bytes memory _data = abi.encode(msg.sender);
+		uint256 numMinted = numberMinted(msg.sender, Phase.PUBLIC) + amount;
+		if (numMinted > MAX_PER_WALLET_PUBLIC) revert MaxMintAmountExceeded();
+		if (_totalMinted() + amount > MAX_SUPPLY) revert MaxSupplyExceeded();
+		if (msg.value < mintPrice * amount) revert InsufficientETH();
+		bytes memory _data = abi.encode(msg.sender, _numberMinted(msg.sender));
 		if (!verifySigner(_data, _signature)) revert InvalidSigner();
-		mintedPublic[msg.sender] = true;
-		_mint(msg.sender, 1);
+		uint64 auxData = _getAux(msg.sender);
+		_setAux(msg.sender, uint64(auxData & ((1 << 32) - 1) | numMinted << 32));
+		_mint(msg.sender, amount);
 	}
 
 	//============================================//
@@ -258,29 +284,29 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//============================================//
 	//         Opensea Registry Overrides         //        
 	//============================================//
-	
-    function setApprovalForAll(address operator, bool approved) public override onlyAllowedOperatorApproval(operator) {
-        super.setApprovalForAll(operator, approved);
-    }
 
-    function approve(address operator, uint256 tokenId) public payable override onlyAllowedOperatorApproval(operator) {
-        super.approve(operator, tokenId);
-    }
+	function setApprovalForAll(address operator, bool approved) public override onlyAllowedOperatorApproval(operator) {
+		super.setApprovalForAll(operator, approved);
+	}
 
-    function transferFrom(address from, address to, uint256 tokenId) public payable override onlyAllowedOperator(from) {
-        super.transferFrom(from, to, tokenId);
-    }
+	function approve(address operator, uint256 tokenId) public payable override onlyAllowedOperatorApproval(operator) {
+		super.approve(operator, tokenId);
+	}
 
-    function safeTransferFrom(address from, address to, uint256 tokenId) public payable override onlyAllowedOperator(from) {
-        super.safeTransferFrom(from, to, tokenId);
-    }
+	function transferFrom(address from, address to, uint256 tokenId) public payable override onlyAllowedOperator(from) {
+		super.transferFrom(from, to, tokenId);
+	}
 
-    function safeTransferFrom(address from, address to, uint256 tokenId, bytes memory data)
-        public
+	function safeTransferFrom(address from, address to, uint256 tokenId) public payable override onlyAllowedOperator(from) {
+		super.safeTransferFrom(from, to, tokenId);
+	}
+
+	function safeTransferFrom(address from, address to, uint256 tokenId, bytes memory data)
+		public
 		payable
-        override
-        onlyAllowedOperator(from)
-    {
-        super.safeTransferFrom(from, to, tokenId, data);
-    }
+		override
+		onlyAllowedOperator(from)
+	{
+		super.safeTransferFrom(from, to, tokenId, data);
+	}
 }
