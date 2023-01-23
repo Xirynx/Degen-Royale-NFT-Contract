@@ -51,12 +51,17 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	error InvalidSigner();
 
 	//============================================//
-	//              State Variables               //        
+	//                 Constants                  //        
 	//============================================//
 
 	uint256 public constant MAX_SUPPLY = 2000;
 	uint8 public constant MAX_PER_WALLET_WHITELIST = 2;
 	uint8 public constant MAX_PER_WALLET_PUBLIC = 2;
+
+	//============================================//
+	//              State Variables               //        
+	//============================================//
+
 	uint256 public mintPrice;
 	bytes32 public merkleRoot;
 	string internal baseURI;
@@ -66,33 +71,6 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//============================================//
 	//              Admin Functions               //        
 	//============================================//
-
-    /** 
-	 * @notice Sets the mint price for all mints
-	 * @dev Caller must be contract owner
-	 * @param _mintPrice New mint price in wei
-	 */
-	function setMintPrice(uint256 _mintPrice) public onlyOwner { 
-        mintPrice = _mintPrice;
-    }
-
-    /** 
-	 * @notice Sets the merkle tree root used to verify whitelist mints
-	 * @dev Caller must be contract owner
-	 * @param _merkleRoot New root of merkle tree for whitelist mints
-	 */
-	function setMerkleRoot(bytes32 _merkleRoot) public onlyOwner { 
-        merkleRoot = _merkleRoot;
-    }
-
-    /** 
-	 * @notice Sets the new signer wallet used to verify public mints
-	 * @dev Caller must be contract owner
-	 * @param _signer New root of merkle tree for whitelist mints
-	 */
-	function setSigner(address _signer) external onlyOwner {
-		signer = _signer;
-	}
 
     /** 
 	 * @notice Sets the base uri for token metadata
@@ -106,22 +84,24 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Starts the whitelist minting phase
 	 * @dev Caller must be contract owner
-	 * @param _merkleRoot New root of merkle tree for whitelist mints. Can be alterred at any point using `setMerkleRoot`
-	 * @param _mintPrice New mint price in wei for the whitelist mint. Can be alterred at any point using `setMintPrice`
+	 * @param _merkleRoot New root of merkle tree for whitelist mints
+	 * @param _mintPrice New mint price in wei for the whitelist mint
 	 */
     function startWhitelistPhase(bytes32 _merkleRoot, uint256 _mintPrice) external onlyOwner { 
-        setMintPrice(_mintPrice);
-        setMerkleRoot(_merkleRoot);
+        _setMintPrice(_mintPrice);
+        _setMerkleRoot(_merkleRoot);
         phase = Phase.WHITELIST;
     }
 
     /**
 	 * @notice Starts the public minting phase
 	 * @dev Caller must be contract owner
-	 * @param _mintPrice New mint price in wei for the public mint. Can be alterred using Can be alterred at any point using `setMintPrice`
+	 * @param _signer New signer wallet to verify public mints
+	 * @param _mintPrice New mint price in wei for the public mint
 	 */
-    function startPublicPhase(uint256 _mintPrice) external onlyOwner { 
-        setMintPrice(_mintPrice);
+    function startPublicPhase(address _signer, uint256 _mintPrice) external onlyOwner { 
+        _setMintPrice(_mintPrice);
+		_setSigner(_signer);
         phase = Phase.PUBLIC;
     }
 
@@ -175,10 +155,37 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//              Helper Functions              //        
 	//============================================//
 
+    /** 
+	 * @notice Sets the mint price for all mints
+	 * @dev Caller must be contract owner
+	 * @param _mintPrice New mint price in wei
+	 */
+	function _setMintPrice(uint256 _mintPrice) internal { 
+        mintPrice = _mintPrice;
+    }
+
+    /** 
+	 * @notice Sets the merkle tree root used to verify whitelist mints
+	 * @dev Caller must be contract owner
+	 * @param _merkleRoot New root of merkle tree for whitelist mints
+	 */
+	function _setMerkleRoot(bytes32 _merkleRoot) internal { 
+        merkleRoot = _merkleRoot;
+    }
+
+    /** 
+	 * @notice Sets the new signer wallet used to verify public mints
+	 * @dev Caller must be contract owner
+	 * @param _signer New root of merkle tree for whitelist mints
+	 */
+	function _setSigner(address _signer) internal {
+		signer = _signer;
+	}
+
 	/**
-	 * @notice Gets number of tokens minted by `wallet` in total
+	 * @notice Gets number of tokens minted by `wallet` in all phases
 	 * @param wallet Address of the minter
-	 * @return uint256 Number of tokens
+	 * @return uint256 Number of tokens minted
 	 */
 	function numberMinted(address wallet) public view returns (uint256) {
 		return _numberMinted(wallet);
