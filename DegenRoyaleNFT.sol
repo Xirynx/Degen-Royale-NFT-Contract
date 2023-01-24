@@ -42,13 +42,17 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//                  Errors                    //   
 	//============================================//
 
+	error InvalidString();
+	error InvalidBytes();
+	error InvalidUint();
+	error InvalidAddress();
 	error MaxSupplyExceeded();
 	error MaxMintAmountExceeded();
 	error AddressNotWhitelisted();
 	error InsufficientETH();
 	error CallerNotOrigin();
 	error IncorrectPhase();
-	error InvalidSigner();
+	error IncorrectSigner();
 
 	//============================================//
 	//                 Constants                  //        
@@ -75,19 +79,25 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /** 
 	 * @notice Sets the base uri for token metadata.
 	 * @dev Caller must be contract owner.
+	 *		`_newURI` must not be an empty string.
 	 * @param _newURI New base uri for token metadata.
 	 */
 	function setBaseURI(string memory _newURI) external onlyOwner {
+		if (bytes(_newURI).length == 0) revert InvalidString();
 		baseURI = _newURI;
 	}
 
     /** 
 	 * @notice Starts the whitelist minting phase.
 	 * @dev Caller must be contract owner.
+	 *		`_merkleRoot` must not be empty.
+	 *		`_mintPrice` must not be zero.
 	 * @param _merkleRoot New root of merkle tree for whitelist mints.
 	 * @param _mintPrice New mint price in wei.
 	 */
-    function startWhitelistPhase(bytes32 _merkleRoot, uint256 _mintPrice) external onlyOwner { 
+    function startWhitelistPhase(bytes32 _merkleRoot, uint256 _mintPrice) external onlyOwner {
+		if (bytes32(0) == _merkleRoot) revert InvalidBytes();
+		if (mintPrice == 0) revert InvalidUint();
         _setMintPrice(_mintPrice);
         _setMerkleRoot(_merkleRoot);
         phase = Phase.WHITELIST;
@@ -96,10 +106,14 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /**
 	 * @notice Starts the public minting phase.
 	 * @dev Caller must be contract owner.
+	 *		`_signer` must not be zero address.
+	 *		`_mintPrice` must not be zero.
 	 * @param _signer New signer wallet to verify public mints.
 	 * @param _mintPrice New mint price in wei.
 	 */
-    function startPublicPhase(address _signer, uint256 _mintPrice) external onlyOwner { 
+    function startPublicPhase(address _signer, uint256 _mintPrice) external onlyOwner {
+		if (address(0) == _signer) revert InvalidAddress();
+		if (mintPrice == 0) revert InvalidUint();
         _setMintPrice(_mintPrice);
 		_setSigner(_signer);
         phase = Phase.PUBLIC;
@@ -116,10 +130,14 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
     /**
 	 * @notice Withdraws entire ether balance in the contract to the wallet specified.
 	 * @dev Caller must be contract owner.
+	 *		`to` must not be zero address.
+	 *		Contract balance should be greater than zero.
 	 * @param to Address to send ether balance to.
 	 */
 	function withdrawFunds(address to) public onlyOwner {
+		if (address(0) == to) revert InvalidAddress();
         uint256 balance = address(this).balance;
+		if (balance == 0) revert InsufficientETH();
         (bool callSuccess, ) = payable(to).call{value: balance}("");
         require(callSuccess, "Call failed");
     }
@@ -189,9 +207,10 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	}
 
 	/**
-	 * @notice Gets number of tokens minted by `wallet` during a specific phase.
-	 * @dev Bits 0 to 31 represent the number minted during the whitelist phase.
-	 		Bits 32 to 63 represent the number minted during the public phase.
+	 * @notice Gets number of tokens minted by `wallet` during a specific phase (excluding tokens minted using `adminMint`).
+	 * @dev This function does not track tokens minted using the `adminMint` function.
+	 *		Bits 0 to 31 represent the number minted during the whitelist phase.
+	 *		Bits 32 to 63 represent the number minted during the public phase.
 	 * @param wallet Address of the minter.
 	 * @param _phase The phase of the mint.
 	 * @return uint32 Number of tokens minted during specified phase, or 0.
@@ -213,7 +232,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	/**
 	 * @notice Mints `amount` tokens to `to` address.
 	 * @dev Caller must be contract owner.
-	 		`amount` must be less than or equal to 30. This avoids excessive first-time transfer fees according to ERC721A standard.
+	 *		`amount` must be less than or equal to 30. This avoids excessive first-time transfer fees according to ERC721A standard.
 	 * 		Total supply must be less than or equal to `MAX_SUPPLY` after mint.
 	 * @param to Address that will receive the tokens.
 	 * @param amount Number of tokens to send to `to`.
@@ -267,7 +286,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 		if (_totalMinted() + amount > MAX_SUPPLY) revert MaxSupplyExceeded();
 		if (msg.value < mintPrice * amount) revert InsufficientETH();
 		bytes memory _data = abi.encode(msg.sender, _numberMinted(msg.sender));
-		if (!verifySigner(_data, _signature)) revert InvalidSigner();
+		if (!verifySigner(_data, _signature)) revert IncorrectSigner();
 		uint64 auxData = _getAux(msg.sender);
 		_setAux(msg.sender, uint64(auxData & ((1 << 32) - 1) | numMinted << 32));
 		_mint(msg.sender, amount);
