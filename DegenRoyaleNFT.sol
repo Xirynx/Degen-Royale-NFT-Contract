@@ -55,6 +55,15 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	error IncorrectSigner();
 
 	//============================================//
+	//                  Events                    //   
+	//============================================//
+
+	event UpdatedBaseURI(address indexed owner, string newURI);
+	event StartedWhitelistPhase(uint256 indexed blockNumber, bytes32 merkleRoot, uint256 mintPrice);
+	event StartedPublicPhase(uint256 indexed blockNumber, address signer, uint256 mintPrice);
+	event WithdrawnFunds(address indexed to, uint256 indexed amount);
+
+	//============================================//
 	//                 Constants                  //        
 	//============================================//
 
@@ -76,7 +85,7 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//              Admin Functions               //        
 	//============================================//
 
-    /** 
+	/** 
 	 * @notice Sets the base uri for token metadata.
 	 * @dev Caller must be contract owner.
 	 *		`_newURI` must not be an empty string.
@@ -85,62 +94,69 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	function setBaseURI(string memory _newURI) external onlyOwner {
 		if (bytes(_newURI).length == 0) revert InvalidString();
 		baseURI = _newURI;
+		emit UpdatedBaseURI(msg.sender, _newURI);
 	}
 
-    /** 
+	/** 
 	 * @notice Starts the whitelist minting phase.
 	 * @dev Caller must be contract owner.
 	 *		`_merkleRoot` must not be empty.
 	 *		`_mintPrice` must not be zero.
+	 *		emits { StartedWhitelistPhase }
 	 * @param _merkleRoot New root of merkle tree for whitelist mints.
 	 * @param _mintPrice New mint price in wei.
 	 */
-    function startWhitelistPhase(bytes32 _merkleRoot, uint256 _mintPrice) external onlyOwner {
+	function startWhitelistPhase(bytes32 _merkleRoot, uint256 _mintPrice) external onlyOwner {
 		if (bytes32(0) == _merkleRoot) revert InvalidBytes();
 		if (mintPrice == 0) revert InvalidUint();
-        _setMintPrice(_mintPrice);
-        _setMerkleRoot(_merkleRoot);
-        phase = Phase.WHITELIST;
-    }
+			_setMintPrice(_mintPrice);
+			_setMerkleRoot(_merkleRoot);
+			phase = Phase.WHITELIST;
+		emit StartedWhitelistPhase(block.number, _merkleRoot, _mintPrice);
+	}
 
-    /**
+	/**
 	 * @notice Starts the public minting phase.
 	 * @dev Caller must be contract owner.
 	 *		`_signer` must not be zero address.
 	 *		`_mintPrice` must not be zero.
+	 *		emits { StartedPublicPhase }
 	 * @param _signer New signer wallet to verify public mints.
 	 * @param _mintPrice New mint price in wei.
 	 */
-    function startPublicPhase(address _signer, uint256 _mintPrice) external onlyOwner {
+	function startPublicPhase(address _signer, uint256 _mintPrice) external onlyOwner {
 		if (address(0) == _signer) revert InvalidAddress();
 		if (mintPrice == 0) revert InvalidUint();
-        _setMintPrice(_mintPrice);
+		_setMintPrice(_mintPrice);
 		_setSigner(_signer);
-        phase = Phase.PUBLIC;
-    }
+		phase = Phase.PUBLIC;
+		emit StartedPublicPhase(block.number, _signer, _mintPrice);
+	}
 
-    /**
+	/**
 	 * @notice Stops sale entirely. No mints can be made by users other than contract owner.
 	 * @dev Caller must be contract owner.
 	 */
 	function stopSale() external onlyOwner { 
-        phase = Phase.NONE;
-    }
+		phase = Phase.NONE;
+	}
 
-    /**
+	/**
 	 * @notice Withdraws entire ether balance in the contract to the wallet specified.
 	 * @dev Caller must be contract owner.
 	 *		`to` must not be zero address.
 	 *		Contract balance should be greater than zero.
+	 *		emits { WithdrawnFunds }
 	 * @param to Address to send ether balance to.
 	 */
 	function withdrawFunds(address to) public onlyOwner {
 		if (address(0) == to) revert InvalidAddress();
-        uint256 balance = address(this).balance;
+		uint256 balance = address(this).balance;
 		if (balance == 0) revert InsufficientETH();
-        (bool callSuccess, ) = payable(to).call{value: balance}("");
-        require(callSuccess, "Call failed");
-    }
+		(bool callSuccess, ) = payable(to).call{value: balance}("");
+		require(callSuccess, "Call failed");
+		emit WithdrawnFunds(to, balance);
+	}
 
 	//============================================//
 	//               Access Control               //        
@@ -153,9 +169,9 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	 * @return bool True if `wallet` is part of the merkle tree, false otherwise.
 	 */
 	function verifyWhitelist(address wallet, bytes32[] calldata _merkleProof) public view returns (bool) {
-        bytes32 leaf = keccak256(abi.encodePacked(wallet));
-        return MerkleProof.verify(_merkleProof, merkleRoot, leaf);       
-    }
+		bytes32 leaf = keccak256(abi.encodePacked(wallet));
+		return MerkleProof.verify(_merkleProof, merkleRoot, leaf);       
+	}
 
 	/**
 	 * @notice Verifies that a message was signed by the current `signer` wallet.
@@ -173,23 +189,23 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	//              Helper Functions              //        
 	//============================================//
 
-    /** 
+	/** 
 	 * @notice Sets the mint price for all mints.
 	 * @param _mintPrice New mint price in wei.
 	 */
 	function _setMintPrice(uint256 _mintPrice) internal { 
-        mintPrice = _mintPrice;
-    }
+		mintPrice = _mintPrice;
+	}
 
-    /** 
+	/** 
 	 * @notice Sets the merkle tree root used to verify whitelist mints.
 	 * @param _merkleRoot New merkle tree root.
 	 */
 	function _setMerkleRoot(bytes32 _merkleRoot) internal { 
-        merkleRoot = _merkleRoot;
-    }
+		merkleRoot = _merkleRoot;
+	}
 
-    /** 
+	/** 
 	 * @notice Sets the new signer wallet used to verify public mints.
 	 * @param _signer New signer wallet.
 	 */
@@ -301,8 +317,8 @@ contract DegenRoyaleNFT is ERC721A("Degen Royale: Cash Gun", "DGCG"), Ownable, D
 	 * @return string the current value of `baseURI`.
 	 */
 	function _baseURI() internal view override returns (string memory) {
-        return baseURI;
-    }
+		return baseURI;
+	}
 
 	//============================================//
 	//         Opensea Registry Overrides         //        
